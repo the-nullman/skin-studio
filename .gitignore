@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.local
+
+# macOS
+.DS_Store
+
+# Editor/agent scratch
+.claude/
+
+# Old archive of the project
+*.zip
