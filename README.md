@@ -36,6 +36,10 @@ npm test           # run the unit tests
 `npm run build` writes a single inlined `dist/index.html` — that one file is
 both what gets deployed and what you can send for offline use.
 
+New to the codebase? [ARCHITECTURE.md](ARCHITECTURE.md) is the developer
+guide: the data-flow model, a map of every module, the invariants that keep
+2D/3D in sync, and checklists for adding tools and blend modes.
+
 ## Deploy
 
 Pushing to `main` triggers `.github/workflows/deploy.yml`, which builds the app
