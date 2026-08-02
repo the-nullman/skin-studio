@@ -1,14 +1,21 @@
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { signal, useSignalEffect } from "@preact/signals";
 import { primaryColor } from "../core/toolState";
 import { hsvToRgb255, hsvToRgba, rgbaToHsv, rgbaToHsl, hslToRgba, rgbaToHex, hexToRgba } from "../core/color";
 
-const SIZE = 148;
-const OUTER_R = SIZE / 2 - 1;
-const RING_W = 14;
-const INNER_R = OUTER_R - RING_W;
-const TRI_R = INNER_R - 4;
-const MID_R = (OUTER_R + INNER_R) / 2;
+// The picker fills the panel's width so it grows when the tool strip is
+// dragged wider. Clamped at both ends: the SV triangle is rasterized per
+// pixel on every color change, so an unbounded size gets expensive.
+const SIZE_MIN = 130;
+const SIZE_MAX = 320;
+const RING_FRACTION = 14 / 148;
+
+function geometry(size: number) {
+  const outerR = size / 2 - 1;
+  const ringW = Math.max(10, size * RING_FRACTION);
+  const innerR = outerR - ringW;
+  return { outerR, ringW, innerR, triR: innerR - 4, midR: (outerR + innerR) / 2 };
+}
 
 // The picker owns the hue: greys/black/white have no derivable hue, so the
 // last chosen hue must survive primaryColor round-trips through such colors.
@@ -35,31 +42,33 @@ function baryWeights(px: number, py: number, vh: [number, number], vw: [number, 
   return { wh, ww, wb: 1 - wh - ww };
 }
 
-function draw(canvas: HTMLCanvasElement, h: number, s: number, v: number) {
+function draw(canvas: HTMLCanvasElement, size: number, h: number, s: number, v: number) {
+  const { ringW, triR, midR } = geometry(size);
   const dpr = Math.min(devicePixelRatio || 1, 2);
-  const px = Math.round(SIZE * dpr);
+  const px = Math.round(size * dpr);
   if (canvas.width !== px) {
     canvas.width = px;
     canvas.height = px;
   }
   const ctx = canvas.getContext("2d")!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, SIZE, SIZE);
+  ctx.clearRect(0, 0, size, size);
 
-  const c = SIZE / 2;
+  const c = size / 2;
   for (let a = 0; a < 360; a += 3) {
     ctx.beginPath();
-    ctx.arc(c, c, MID_R, rad(a - 2), rad(a + 2.2));
+    ctx.arc(c, c, midR, rad(a - 2), rad(a + 2.2));
     ctx.strokeStyle = `hsl(${a},100%,50%)`;
-    ctx.lineWidth = RING_W;
+    ctx.lineWidth = ringW;
     ctx.stroke();
   }
 
   // SV triangle, rendered per-pixel in device space.
-  const { vh, vw, vb } = triVertices(h, TRI_R * dpr, c * dpr, c * dpr);
+  const { vh, vw, vb } = triVertices(h, triR * dpr, c * dpr, c * dpr);
   const img = ctx.getImageData(0, 0, px, px);
   const data = img.data;
-  const lo = Math.floor((c - TRI_R) * dpr), hi = Math.ceil((c + TRI_R) * dpr);
+  const lo = Math.max(0, Math.floor((c - triR) * dpr));
+  const hi = Math.min(px - 1, Math.ceil((c + triR) * dpr));
   for (let y = lo; y <= hi; y++) {
     for (let x = lo; x <= hi; x++) {
       const { wh, ww, wb } = baryWeights(x + 0.5, y + 0.5, vh, vw, vb);
@@ -89,11 +98,12 @@ function draw(canvas: HTMLCanvasElement, h: number, s: number, v: number) {
     ctx.stroke();
   };
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  marker(c + MID_R * Math.cos(rad(h)), c + MID_R * Math.sin(rad(h)), 4.5);
-  const tv = triVertices(h, TRI_R, c, c);
+  const markerR = Math.max(4, size * 0.03);
+  marker(c + midR * Math.cos(rad(h)), c + midR * Math.sin(rad(h)), markerR);
+  const tv = triVertices(h, triR, c, c);
   const mx = s * v * tv.vh[0] + (1 - s) * v * tv.vw[0] + (1 - v) * tv.vb[0];
   const my = s * v * tv.vh[1] + (1 - s) * v * tv.vw[1] + (1 - v) * tv.vb[1];
-  marker(mx, my, 4);
+  marker(mx, my, markerR - 0.5);
 }
 
 /** Current HSV with the picker's sticky hue filled in for greys. */
@@ -124,7 +134,27 @@ function SliderRow(props: { label: string; max: number; value: number; onInput: 
 
 export function ColorPicker() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<"hue" | "sv" | null>(null);
+  const [size, setSize] = useState(148);
+  // Pointer handlers bind once, so they read the live size from a ref.
+  const sizeRef = useRef(148);
+
+  // Track the panel width so the picker grows with a dragged splitter.
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const ro = new ResizeObserver(() => {
+      const w = wrap.clientWidth;
+      if (!w) return;
+      const next = Math.round(Math.max(SIZE_MIN, Math.min(SIZE_MAX, w)));
+      if (next === sizeRef.current) return;
+      sizeRef.current = next;
+      setSize(next);
+    });
+    ro.observe(wrap);
+    return () => ro.disconnect();
+  }, []);
 
   // Adopt the hue of externally chosen colors (swatches, eyedropper, hex).
   useSignalEffect(() => {
@@ -137,8 +167,16 @@ export function ColorPicker() {
     const hsv = rgbaToHsv(primaryColor.value);
     const canvas = canvasRef.current;
     if (!canvas) return;
-    draw(canvas, hsv.h ?? hue, hsv.s, hsv.v);
+    draw(canvas, sizeRef.current, hsv.h ?? hue, hsv.s, hsv.v);
   });
+
+  // Redraw at the new scale when the panel is resized.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const hsv = rgbaToHsv(primaryColor.peek());
+    draw(canvas, size, hsv.h ?? pickerHue.peek(), hsv.s, hsv.v);
+  }, [size]);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -149,8 +187,10 @@ export function ColorPicker() {
     };
 
     const apply = (e: PointerEvent) => {
+      const s0 = sizeRef.current;
+      const { triR } = geometry(s0);
       const [x, y] = pointOf(e);
-      const cx = x - SIZE / 2, cy = y - SIZE / 2;
+      const cx = x - s0 / 2, cy = y - s0 / 2;
       const alpha = primaryColor.value[3];
       if (dragRef.current === "hue") {
         const h = ((Math.atan2(cy, cx) * 180) / Math.PI + 360) % 360;
@@ -159,7 +199,7 @@ export function ColorPicker() {
         primaryColor.value = hsvToRgba(h, s, v, alpha);
       } else if (dragRef.current === "sv") {
         const h = currentHsv().h;
-        const { vh, vw, vb } = triVertices(h, TRI_R, SIZE / 2, SIZE / 2);
+        const { vh, vw, vb } = triVertices(h, triR, s0 / 2, s0 / 2);
         const w = baryWeights(x, y, vh, vw, vb);
         const wb = Math.min(1, Math.max(0, w.wb));
         const wh = Math.min(1, Math.max(0, w.wh));
@@ -171,12 +211,14 @@ export function ColorPicker() {
 
     const onDown = (e: PointerEvent) => {
       if (e.button !== 0) return;
+      const s0 = sizeRef.current;
+      const { outerR, innerR, triR } = geometry(s0);
       const [x, y] = pointOf(e);
-      const r = Math.hypot(x - SIZE / 2, y - SIZE / 2);
-      if (r >= INNER_R - 1 && r <= OUTER_R + 3) dragRef.current = "hue";
-      else if (r < INNER_R) {
+      const r = Math.hypot(x - s0 / 2, y - s0 / 2);
+      if (r >= innerR - 1 && r <= outerR + 3) dragRef.current = "hue";
+      else if (r < innerR) {
         const { h } = currentHsv();
-        const { vh, vw, vb } = triVertices(h, TRI_R, SIZE / 2, SIZE / 2);
+        const { vh, vw, vb } = triVertices(h, triR, s0 / 2, s0 / 2);
         const w = baryWeights(x, y, vh, vw, vb);
         if (w.wh < -0.08 || w.ww < -0.08 || w.wb < -0.08) return;
         dragRef.current = "sv";
@@ -221,11 +263,11 @@ export function ColorPicker() {
   };
 
   return (
-    <div class="color-picker">
+    <div class="color-picker" ref={wrapRef}>
       <canvas
         ref={canvasRef}
         class="picker-canvas"
-        style={{ width: SIZE, height: SIZE }}
+        style={{ width: size, height: size }}
       />
       <div class="hex-row">
         <input

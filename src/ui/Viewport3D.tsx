@@ -59,6 +59,10 @@ export function Viewport3D() {
     stateRef.current = { viewport, model, sourceCanvas, sourceCtx, floorGrid, pixelGrid, compositePixels: null };
     applyVisibility();
 
+    if (import.meta.env.DEV) {
+      (globalThis as unknown as { __skin3d: unknown }).__skin3d = { viewport, model };
+    }
+
     const canvas = viewport.renderer.domElement;
     let painting = false;
     let lastHit: TexelHit | null = null;

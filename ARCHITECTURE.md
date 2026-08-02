@@ -56,6 +56,7 @@ src/
   ui/                   Preact components, one per panel
     Canvas2D.tsx        zoomable 2D texture editor
     Viewport3D.tsx      3D panel; binds signals ↔ three objects, paint input
+    Resizer.tsx         drag handle that resizes a panel via a CSS variable
     ToolStrip.tsx       tool buttons + per-tool options + swatches + undo/redo
     ColorPicker.tsx     hue ring + SV triangle, hand-rendered on a canvas
     LayerPanel.tsx      layer list (visibility, blend, opacity, reorder...)
@@ -184,15 +185,20 @@ Current tools:
 - **brush / eraser** (`brush.ts`) — same dragged-stamp implementation with a
   different color function (eraser stamps `[0,0,0,0]`). Stamp is a
   `size × size` square, size 1–8. Exports `line()` (Bresenham) for reuse.
-- **fill** (`fill.ts`) — 4-connected flood fill on `onDown` only. With "Limit
-  to part" on, bounds are the clicked **face rect** (e.g. just the head's
-  front face), not the part's whole unwrap.
+- **fill** (`fill.ts`) — two modes. *Matching color* is a 4-connected flood
+  fill on `onDown` only; with "Stay inside one face" on, bounds are the clicked
+  **face rect** (e.g. just the head's front face). *Whole body part* ignores
+  existing colors and repaints every texel of the clicked part and skin layer —
+  all six faces at once, via `partTexels`.
 - **eyedropper** (`eyedropper.ts`) — writes `primaryColor` from
   `ctx.composite` on down *and* move (drag to scrub-sample).
 - **shade** (`shade.ts`) — darken/lighten, see below. Keeps a module-level
   `visited` set so each texel shades **once per stroke** no matter how often
   the drag recrosses it; `onUp` clears it, `onBreak` deliberately doesn't
-  (same stroke). Transparent texels are skipped, alpha preserved.
+  (same stroke). Transparent texels are skipped, alpha preserved. The tool
+  shades texels already on the canvas; the ToolStrip's separate "Shade the
+  color" buttons apply the same `shadeRgb255` step to the *selected color*, so
+  the next stroke paints the shaded tone.
 
 ### Adding a tool (checklist)
 
@@ -255,29 +261,54 @@ all of this down — including convergence after 60 passes.
 **viewport.ts** — a self-contained `Viewport` class (renderer, perspective +
 orthographic cameras, OrbitControls, rAF loop). Input scheme: **left-drag** is
 decided per-press (paint vs orbit — see below), **right-drag** rotates,
-**middle-drag** pans, two-finger scroll pans, pinch or ctrl/cmd+scroll zooms.
-Lighting is a single ambient at intensity π — under three's physical lighting
-that reproduces texture colors *exactly*, so the model matches the 2D canvas;
-don't add directional lights or colors will shift. View presets snap to
-orthographic (they're for reading proportions).
+**middle-drag** and **shift+wheel** pan, and **wheel zooms**. Mouse wheels send
+~100 per notch while a trackpad pinch (ctrl+wheel) sends single digits, so the
+two use different exponent factors — one shared value makes one of them
+unusable. Lighting is a single ambient at intensity π — under three's physical
+lighting that reproduces texture colors *exactly*, so the model matches the 2D
+canvas; don't add directional lights or colors will shift. View presets snap to
+orthographic (they're for reading proportions). A `ResizeObserver` on the
+container drives `resize()`: panels are user-resizable, and that fires no
+window resize — without it the canvas keeps three's default 600×300 and the
+cameras keep an aspect of 0.
 
 **playerModel.ts** — wraps skinview3d's `PlayerObject`. The texture is a
 `CanvasTexture` over a 64×64 canvas; repainting = `putImageData` + `texture
 .needsUpdate = true` (`markTextureDirty`). NearestFilter keeps pixels crisp.
 The model natively faces +Z — don't rotate it, the view presets' labels depend
-on it. Cape/elytra meshes are hidden (untextured white otherwise).
+on it. Cape/elytra meshes are hidden (untextured white otherwise) — note this
+hides the *group*, which is why `paint3d` must walk ancestors. The constructor
+also alpha-tests each **inner**-layer material: skinview3d ships it fully
+opaque, so a texel erased to alpha 0 rendered as solid *black* instead of
+reading as empty.
 
 **paint3d.ts** — `raycastTexel` converts a pointer event to a texel via the
-hit's UV. The subtlety: skinview3d renders **inner**-layer meshes opaque
-(transparent texels appear as solid, paintable surface) but **outer**-layer
-meshes alpha-tested (transparent texels are true holes). The outer box still
-*geometrically* intersects the ray, so a naive nearest-hit would return the
-invisible jacket shell and you'd paint texels the user can't see. Fix: for
-alpha-tested hits, check the composite's alpha at that texel — if 0, the eye
-looks through the hole, so continue to the next hit. If *nothing* opaque is
-hit, fall back to the nearest hit so a fresh blank outer layer is still
-paintable (hide the inner layer to reach it). `Viewport3D` supplies the
-`alphaAt` lookup from its cached composite.
+hit's UV. It is the most bug-prone file in the project; four separate rules
+each exist because breaking them produces paint landing somewhere other than
+where you clicked:
+
+1. **Walk ancestors for visibility, not just `hit.object.visible`.** skinview3d
+   hides the cape and elytra by toggling their *parent group*, so those meshes
+   keep `visible === true` themselves. The hidden cape hangs behind the body,
+   so checking only the leaf let it intercept every click on the model's back —
+   and because a cape unwraps to the texture's top-left, that paint landed on
+   the head. This was the "I paint on the back of the arm and it paints the
+   side of the head" bug. `isVisible()` walks the parent chain.
+2. **Reject back-facing hits.** Outer-layer meshes are `DoubleSide`, so a ray
+   passing through a transparent near face also registers hits on the *inside*
+   of the far wall — painting the opposite side of the model.
+3. **Pass through transparent texels on alpha-tested layers.** A hit on an
+   alpha-tested mesh whose composite alpha is 0 is a hole the eye sees through,
+   so the ray continues. If *nothing* opaque is hit, fall back to the nearest
+   hit so a fresh blank outer layer is still paintable (hide the inner layer to
+   reach it). `Viewport3D` supplies the `alphaAt` lookup from its cached
+   composite.
+4. **Refresh `camera.updateMatrixWorld()` before casting.** A pointer event can
+   arrive before the next animation frame has refreshed a camera that just
+   moved (e.g. clicking straight after a view preset).
+
+`paint3d.test.ts` pins rules 1–3 headlessly with plain three.js meshes and a
+stubbed canvas — no DOM or skinview3d needed.
 
 **grids.ts** — floor grid + per-texel wireframe boxes. Wires are added as
 *siblings* of each mesh (`Object3D.add` reparents — collecting them into a
@@ -302,11 +333,20 @@ one button does both.
 - **ColorPicker** — hue ring + SV triangle rendered per-pixel; barycentric
   coordinates map position ↔ HSV (the file comments derive it). The picker
   owns a sticky `pickerHue` signal because greys/black/white round-trip
-  through `primaryColor` with no derivable hue.
-- **ToolStrip / LayerPanel / BodyPartsPanel / TopBar** — thin signal wiring;
-  nothing tricky. LayerPanel renders the list reversed (top layer first, like
-  Photoshop). BodyPartsPanel's doll is a CSS grid sized 5 px per texel so
-  proportions match the model (arms narrow on Alex).
+  through `primaryColor` with no derivable hue. Its size follows the panel
+  width (clamped 130–320 px) via a `ResizeObserver`; pointer handlers bind once
+  so they read the live size from a ref rather than a captured value.
+- **ToolStrip / LayerPanel / TopBar** — thin signal wiring; nothing tricky.
+  LayerPanel renders the list reversed (top layer first, like Photoshop).
+- **BodyPartsPanel** — the doll is a CSS grid sized 8 px per texel so
+  proportions match the model (arms narrow on Alex). "Body" and "Outer layer"
+  are **independent toggles, not tabs**: either, both, or neither can be on.
+  When both are on, each cell nests the body block inside the outer layer's
+  frame, so the ring toggles the overlay and the block toggles the body.
+- **Resizer.tsx** — a drag handle between two grid columns. It writes a pixel
+  width into a CSS custom property (`--left-w`, `--v2d-w`, `--right-w`) on its
+  parent; the layout decides which track reads that property, so the component
+  stays layout-agnostic.
 - **Icon.tsx** — Material Symbols imported as raw SVG strings at build time:
   they inherit `currentColor` and ship in the bundle (this matters for the
   single-file build — no icon font, no CDN).
@@ -321,13 +361,23 @@ the domain or another panel cares about is a core signal.
 `npm test` (vitest, no DOM emulation needed — core is browser-API-free):
 
 - `compositor.test.ts` — alpha compositing and blend math.
-- `tools/fill.test.ts` — flood fill + face-rect limiting.
+- `tools/fill.test.ts` — flood fill, face-rect limiting, whole-part fill.
 - `shade.test.ts` — shading math (direction, temperature, gamut, convergence)
   and the once-per-stroke visited semantics via the `Tool` callbacks.
+- `three/paint3d.test.ts` — raycast hit selection: ancestor visibility, nearest
+  surface, alpha pass-through, back-face rejection.
 
 The pattern for new logic tests: build a bare `Uint8ClampedArray`, a literal
-`StrokeContext`, call the tool/function, assert on bytes. UI behavior is
-verified by hand in the browser (`npm run dev`).
+`StrokeContext`, call the tool/function, assert on bytes. three.js code is
+testable the same way — geometry and raycasting need no DOM, and a canvas can
+be stubbed down to `getBoundingClientRect`.
+
+In dev builds only, `main.tsx` and `Viewport3D` publish `window.__skin`
+(document + compositor modules) and `window.__skin3d` (viewport + model). They
+exist so browser-driven checks can read the exact composited texture and camera
+state instead of inferring it from rendered pixels — which is how the cape bug
+above was finally pinned down. Both are stripped from production by their
+`import.meta.env.DEV` guard.
 
 `npm run build` runs `tsc --noEmit` first, so type errors fail the build (and
 the deploy workflow).
@@ -349,7 +399,7 @@ file. Pushing to `main` auto-deploys via `.github/workflows/deploy.yml`.
 - `layer.mask` is honored by the compositor but no UI creates or edits masks.
 - `react-colorful` in `package.json` is unused (the custom picker replaced
   it) — safe to remove.
-- `validMask` / `partTexels` / `partBounds` in `skinLayout.ts` are unused
-  helpers awaiting features.
+- `validMask` / `partBounds` in `skinLayout.ts` are unused helpers awaiting
+  features (`partTexels` now backs the whole-part fill).
 - Not undoable: model-type switch, part visibility, Import/New (see history
   section).

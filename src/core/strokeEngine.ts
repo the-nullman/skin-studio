@@ -1,7 +1,7 @@
 import { W, H } from "./skinLayout";
 import { activeLayer, layers, type RGBA } from "./document";
 import {
-  activeTool, brushSize, primaryColor, fillLimitToPart,
+  activeTool, brushSize, primaryColor, fillLimitToPart, fillMode,
   shadeDirection, shadeMode, shadeAmount, type ToolId,
 } from "./toolState";
 import { brushTool, eraserTool } from "./tools/brush";
@@ -35,6 +35,7 @@ function makeCtx(pixels: RGBA): StrokeContext {
     color: primaryColor.value,
     size: brushSize.value,
     limitToPart: fillLimitToPart.value,
+    fillMode: fillMode.value,
     shade: { direction: shadeDirection.value, mode: shadeMode.value, amount: shadeAmount.value },
   };
 }

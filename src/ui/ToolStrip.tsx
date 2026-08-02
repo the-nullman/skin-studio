@@ -1,8 +1,9 @@
 import {
-  activeTool, brushSize, primaryColor, fillLimitToPart,
+  activeTool, brushSize, primaryColor, fillLimitToPart, fillMode,
   shadeDirection, shadeMode, shadeAmount,
-  type ToolId, type RGBAColor, type ShadeMode,
+  type ToolId, type RGBAColor, type ShadeMode, type ShadeDirection, type FillMode,
 } from "../core/toolState";
+import { shadeRgb255 } from "../core/color";
 import { undo, redo, undoStack, redoStack } from "../core/history";
 import { ColorPicker } from "./ColorPicker";
 import { Icon, type IconName } from "./Icon";
@@ -23,6 +24,14 @@ const PRESET_COLORS: RGBAColor[] = [
 
 function rgba([r, g, b, a]: RGBAColor) {
   return `rgba(${r},${g},${b},${a / 255})`;
+}
+
+/** Shade the selected color itself, so the next stroke paints the shaded tone
+ * (as opposed to the tool, which shades texels already on the canvas). */
+function shadeSelectedColor(direction: ShadeDirection) {
+  const c = primaryColor.value;
+  const [r, g, b] = shadeRgb255([c[0], c[1], c[2]], direction, shadeMode.value, shadeAmount.value);
+  primaryColor.value = [r, g, b, c[3]];
 }
 
 export function ToolStrip() {
@@ -52,14 +61,27 @@ export function ToolStrip() {
       />
 
       {activeTool.value === "fill" && (
-        <label class="row">
-          <input
-            type="checkbox"
-            checked={fillLimitToPart.value}
-            onChange={e => (fillLimitToPart.value = (e.target as HTMLInputElement).checked)}
-          />
-          Limit to part
-        </label>
+        <>
+          <h3>Fill mode</h3>
+          <select
+            class="view-select mode-select"
+            value={fillMode.value}
+            onChange={e => (fillMode.value = (e.target as HTMLSelectElement).value as FillMode)}
+          >
+            <option value="color">Matching color</option>
+            <option value="part">Whole body part</option>
+          </select>
+          {fillMode.value === "color" && (
+            <label class="row">
+              <input
+                type="checkbox"
+                checked={fillLimitToPart.value}
+                onChange={e => (fillLimitToPart.value = (e.target as HTMLInputElement).checked)}
+              />
+              Stay inside one face
+            </label>
+          )}
+        </>
       )}
 
       {activeTool.value === "shade" && (
@@ -96,6 +118,11 @@ export function ToolStrip() {
               onInput={e => (shadeAmount.value = Number((e.target as HTMLInputElement).value) / 100)}
             />
             <span class="val pct">{Math.round(shadeAmount.value * 100)}%</span>
+          </div>
+          <h3>Shade the color</h3>
+          <div class="seg">
+            <button onClick={() => shadeSelectedColor("darken")}>Darken</button>
+            <button onClick={() => shadeSelectedColor("lighten")}>Lighten</button>
           </div>
         </>
       )}

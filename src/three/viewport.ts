@@ -26,6 +26,7 @@ export class Viewport {
   mode: CameraMode = "perspective";
   private container: HTMLElement;
   private raf = 0;
+  private resizeObserver: ResizeObserver;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -61,14 +62,19 @@ export class Viewport {
       MIDDLE: THREE.MOUSE.PAN,
       RIGHT: THREE.MOUSE.ROTATE,
     };
-    // Wheel is handled here, not by OrbitControls: macOS two-finger swipe
-    // (plain wheel) pans, pinch (wheel with ctrlKey) or ctrl/cmd+scroll zooms.
+    // Wheel is handled here, not by OrbitControls, so the modifiers can mean
+    // what they do in the 2D view: plain wheel (and pinch) zooms, shift+wheel
+    // pans. Middle-drag pans too.
     this.controls.enableZoom = false;
     this.renderer.domElement.addEventListener("wheel", this.onWheel, { passive: false });
     this.controls.update();
 
     this.resize();
     window.addEventListener("resize", this.resize);
+    // The container also changes size when the user drags a panel splitter,
+    // which fires no window resize — observe the element itself.
+    this.resizeObserver = new ResizeObserver(this.resize);
+    this.resizeObserver.observe(container);
     this.loop();
   }
 
@@ -84,8 +90,14 @@ export class Viewport {
 
   private onWheel = (e: WheelEvent) => {
     e.preventDefault();
-    if (e.ctrlKey || e.metaKey) this.zoomBy(Math.exp(e.deltaY * 0.01));
-    else this.panBy(e.deltaX, e.deltaY);
+    if (e.shiftKey) {
+      this.panBy(e.deltaX, e.deltaY);
+      return;
+    }
+    // A trackpad pinch arrives as ctrl+wheel with small deltas; a mouse wheel
+    // sends ~100 per notch. One shared factor makes one of them unusable, so
+    // scale them separately.
+    this.zoomBy(Math.exp(e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)));
   };
 
   private zoomBy(factor: number) {
@@ -174,6 +186,7 @@ export class Viewport {
   dispose() {
     cancelAnimationFrame(this.raf);
     window.removeEventListener("resize", this.resize);
+    this.resizeObserver.disconnect();
     this.renderer.domElement.removeEventListener("wheel", this.onWheel);
     this.controls.dispose();
     this.renderer.dispose();

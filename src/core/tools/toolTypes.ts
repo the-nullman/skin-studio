@@ -1,5 +1,5 @@
 import type { RGBA } from "../document";
-import type { RGBAColor, ShadeDirection, ShadeMode } from "../toolState";
+import type { FillMode, RGBAColor, ShadeDirection, ShadeMode } from "../toolState";
 
 export interface StrokeContext {
   pixels: RGBA; // active layer buffer, mutated in place
@@ -7,6 +7,7 @@ export interface StrokeContext {
   color: RGBAColor;
   size: number;
   limitToPart: boolean;
+  fillMode: FillMode;
   shade: { direction: ShadeDirection; mode: ShadeMode; amount: number };
 }
 

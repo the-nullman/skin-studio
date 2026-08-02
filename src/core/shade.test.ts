@@ -14,6 +14,7 @@ function makeCtx(pixels: RGBA, shade: Partial<StrokeContext["shade"]> = {}): Str
     color: [0, 0, 0, 255],
     size: 1,
     limitToPart: false,
+    fillMode: "color",
     shade: { direction: "darken", mode: "temperature", amount: 0.2, ...shade },
   };
 }

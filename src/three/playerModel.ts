@@ -2,7 +2,7 @@ import * as THREE from "three";
 import { PlayerObject } from "skinview3d";
 import type { BodyPart } from "skinview3d";
 import type { ModelType, PartName, SkinLayer } from "../core/skinLayout";
-import { W, H } from "../core/skinLayout";
+import { W, H, PART_NAMES } from "../core/skinLayout";
 
 export function bodyPartFor(player: PlayerObject, part: PartName): BodyPart {
   switch (part) {
@@ -34,6 +34,17 @@ export class PlayerModel {
     // untextured (white) cape mesh visible by default, overlapping the torso.
     this.player.cape.visible = false;
     this.player.elytra.visible = false;
+    // skinview3d gives the inner (body) layer a fully opaque material, so a
+    // texel erased to alpha 0 renders as solid *black* on the model instead of
+    // reading as empty. Alpha-test it the same way the outer layer already is,
+    // and the eraser cuts real holes — matching the 2D view's checkerboard.
+    for (const part of PART_NAMES) {
+      const mesh = bodyPartFor(this.player, part).innerLayer as THREE.Mesh;
+      const mat = mesh.material as THREE.MeshStandardMaterial;
+      mat.transparent = true;
+      mat.alphaTest = 1e-5;
+      mat.needsUpdate = true;
+    }
   }
 
   setModelType(m: ModelType) {

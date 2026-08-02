@@ -7,12 +7,15 @@ sign up for.
 **Features**
 - Steve (classic) and Alex (slim) models, switchable at any time.
 - Import and export standard 64×64 skin PNGs.
-- Brush, eraser, fill (whole part or flood), and eyedropper.
+- Brush, eraser, eyedropper, and a fill tool with two modes: flood the
+  matching-color area, or repaint a whole body part in one click.
+- Resizable panels and a 2D/3D splitter; scroll to zoom in either view.
 - Darken/Lighten tool with a plain-value mode and a painterly OKLCH
   color-temperature mode (cool shadows, warm highlights).
 - Layers with opacity, 12 Photoshop-style blend modes, and undo/redo.
 - Custom triangular color picker with hex / RGB / HSL input.
-- Per-part and per-layer visibility via a model-proportional paper doll.
+- Per-part and per-layer visibility via a model-proportional paper doll, with
+  the body and outer layers as independent toggles.
 
 ## Use it
 

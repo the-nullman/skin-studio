@@ -5,6 +5,7 @@ import { ToolStrip } from "./ui/ToolStrip";
 import { Canvas2D } from "./ui/Canvas2D";
 import { Viewport3D } from "./ui/Viewport3D";
 import { LayerPanel } from "./ui/LayerPanel";
+import { Resizer } from "./ui/Resizer";
 import { undo, redo } from "./core/history";
 
 export function App() {
@@ -27,8 +28,13 @@ export function App() {
       <TopBar />
       <div class="app-body">
         <ToolStrip />
-        <Canvas2D />
-        <Viewport3D />
+        <Resizer cssVar="--left-w" min={150} max={420} />
+        <div class="viewports">
+          <Canvas2D />
+          <Resizer cssVar="--v2d-w" min={220} max={1600} />
+          <Viewport3D />
+        </div>
+        <Resizer cssVar="--right-w" min={190} max={560} trailing />
         <div class="right-col">
           <LayerPanel />
           <BodyPartsPanel />

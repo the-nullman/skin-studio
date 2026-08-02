@@ -80,12 +80,30 @@ label.row {
 .topbar .active-layer { color: var(--text-dim); }
 .model-switch { display: flex; gap: 4px; }
 
+/* Column widths live in custom properties so the Resizer handles can drive
+   them by drag. The viewport split is its own nested grid so the 2D/3D
+   divider is independent of the two sidebars. */
 .app-body {
   flex: 1;
   display: grid;
-  grid-template-columns: 176px 1fr 1fr 240px;
+  grid-template-columns: var(--left-w, 176px) 5px minmax(0, 1fr) 5px var(--right-w, 240px);
   min-height: 0;
 }
+
+.viewports {
+  display: grid;
+  grid-template-columns: var(--v2d-w, 1fr) 5px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+}
+
+.resizer {
+  background: var(--border);
+  cursor: col-resize;
+  touch-action: none;
+}
+.resizer:hover,
+.resizer.dragging { background: var(--accent); }
 
 .right-col {
   display: flex;
@@ -114,7 +132,6 @@ label.row {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  border-right: 1px solid var(--border);
 }
 
 .canvas2d-toolbar, .viewport3d-toolbar {
@@ -291,9 +308,8 @@ label.row {
 .part-tabs button { flex: 1; padding: 5px 4px; }
 .doll {
   display: grid;
-  /* Columns come inline from BodyPartsPanel: they track the active model's
-     arm width (Steve 4px-texel arms, Alex slim 3px). */
-  grid-template-rows: 40px 60px 60px;
+  /* Columns and rows come inline from BodyPartsPanel: they track the active
+     model's arm width (Steve 4px-texel arms, Alex slim 3px). */
   grid-template-areas:
     ". head head ."
     "rarm body body larm"
@@ -302,16 +318,36 @@ label.row {
   width: fit-content;
   margin: 10px auto 4px;
 }
-.doll.dim { opacity: 0.4; }
+/* Each cell stacks the outer-layer frame and the body block, so with both
+   skin layers shown the ring and the block inside it toggle independently. */
+.doll-cell { position: relative; }
 .doll-part {
+  position: absolute;
+  inset: 0;
   padding: 0;
   border-radius: 3px;
   background: var(--panel-2);
   border: 2px solid var(--border);
 }
+.doll-part.base.nested {
+  inset: 6px;
+  border-radius: 2px;
+}
+.doll-part.outer { background: transparent; }
 .doll-part:hover { background: #34343b; }
 .doll-part.on {
   border-color: #43c059;
   background: rgba(67, 192, 89, 0.14);
 }
 .doll-part.on:hover { background: rgba(67, 192, 89, 0.24); }
+.doll-part.outer.on {
+  border-color: #d8a13a;
+  background: rgba(216, 161, 58, 0.10);
+}
+.doll-part.outer.on:hover { background: rgba(216, 161, 58, 0.2); }
+.doll-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+}
